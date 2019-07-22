@@ -1,0 +1,64 @@
+# Copyright 2019, Doug Knight
+# All Rights Reserved
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS Organization Management Tools
+Parameters:
+  OrgManagerUsername:
+    Type: String
+    Default: org-admin
+    Description: The name of the organization manager user account.
+    AllowedPattern: '[-_+=,.@A-Za-z0-9]+'
+    ConstraintDescription: 'May only contain alphanumeric and _+=,.@- characters.'
+
+Resources:
+
+  # The organization manager IAM user
+  OrgManagerUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref OrgManagerUsername
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+  # Role assumed by organization manager to modify resources
+  OrgManagerAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Principal:
+            AWS: !GetAtt [ OrgManagerUser, Arn ]
+          Effect: Allow
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AdministratorAccess
+
+  # The bucket to hold the organization management tools templates and scripts
+  OrgManagerToolsBucket:
+    Type: AWS::S3::Bucket
+
+  # A policy restricting bucket access to the organization manager IAM user (and role)
+  OrgManagerToolsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref OrgManagerToolsBucket
+      PolicyDocument:
+        Statement:
+        - Principal: '*'
+          Effect: Deny
+          Action: s3:*
+          Resource:
+          - !Sub 'arn:aws:s3:::${OrgManagerToolsBucket}'
+          - !Sub 'arn:aws:s3:::${OrgManagerToolsBucket}/*'
+          Condition:
+            StringNotEquals:
+              aws:PrincipalArn:
+              - !GetAtt [ OrgManagerUser, Arn ]
+              - !GetAtt [ OrgManagerAdminRole, Arn ]
+
+Outputs:
+  OrgManagerAdminRoleArn:
+    Description: The ARN of the administrative role used by the organization manager.
+    Value: !GetAtt [ OrgManagerAdminRole, Arn ]
