@@ -1,0 +1,144 @@
+# Copyright 2019, Doug Knight
+# All Rights Reserved
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS Organization Management Tools
+Parameters:
+  OrgManagerUsername:
+    Type: String
+    Default: org-admin
+    Description: The name of the organization manager user account.
+    AllowedPattern: '[-_+=,.@A-Za-z0-9]+'
+    ConstraintDescription: 'May only contain alphanumeric and _+=,.@- characters.'
+
+Resources:
+
+  # The organization manager IAM user
+  OrgManagerUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref OrgManagerUsername
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+  # Role assumed by organization manager to modify resources
+  OrgManagerAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Principal:
+            AWS: !GetAtt [ OrgManagerUser, Arn ]
+          Effect: Allow
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AdministratorAccess
+
+  # The bucket to hold the organization management tools templates and scripts
+  OrgManagerToolsBucket:
+    Type: AWS::S3::Bucket
+
+  # A policy restricting bucket access to the organization manager IAM user (and role)
+  OrgManagerToolsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref OrgManagerToolsBucket
+      PolicyDocument:
+        Statement:
+        - Principal: '*'
+          Effect: Deny
+          Action: s3:*
+          Resource:
+          - !Sub 'arn:aws:s3:::${OrgManagerToolsBucket}'
+          - !Sub 'arn:aws:s3:::${OrgManagerToolsBucket}/*'
+          Condition:
+            StringNotEquals:
+              aws:PrincipalArn:
+              - !GetAtt [ OrgManagerUser, Arn ]
+              - !GetAtt [ OrgManagerAdminRole, Arn ]
+
+  OrganizationResRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Principal:
+            Service: lambda.amazonaws.com
+          Effect: Allow
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: logging
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - arn:aws:logs:*:*:*
+
+  OrganizationRes:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3, logging, cfnresponse, json
+
+          logger = logging.getLogger()
+          logger.setLevel(loggin.INFO)
+
+          def lambda_handler(event, context):
+            requestType = event['RequestType']
+            physicalId = event['ResourceProperties'].get('PhysicalResourceId')
+            featureSet = event['ResourceProperties'].get('FeatureSet', 'ALL')
+
+            orgs = boto3.client('organizations')
+            try:
+              if reqtype == 'Create':
+                response = orgs.create_organization(FeatureSet=featureSet)
+                data = {}
+                response['Organization']['Arn']
+                response['Organization']['Id']
+                response['Organization']['MasterAccountArn']
+                response['Organization']['MasterAccountId']
+          {
+                    "Organization": {
+                            "Arn": "arn:aws:organizations::111111111111:organization/o-exampleorgid",
+                            "AvailablePolicyTypes": [],
+                            "Id": "o-exampleorgid",
+                            "MasterAccountArn": "arn:aws:organizations::111111111111:account/o-exampleo
+rgid/1111111  11111",
+                            "MasterAccountEmail": "bill@example.com",
+                            "MasterAccountId": "111111111111",
+                            "FeatureSet": "CONSOLIDATED_BILLING"
+                    }
+          }
+
+
+              elif reqtype == 'Delete':
+
+              elif reqtype == 'Update':
+                cfnresponse.send(event, context, cfnresponse.FAILED)
+              end
+            except ClientError as e:
+              send('FAILED', e)
+
+      Handler: index.lambda_handler
+      Timeout: 30
+      Role: !GetAtt 'OrgResRole.Arn'
+      Runtime: python3.6
+
+  Organization:
+    Type: Custom::OrganizationRes
+    Properties:
+      ServiceToken: !GetAtt 'OrganizationRes.Arn'
+      FeatureSet: All
+
+Outputs:
+  OrgManagerAdminRoleArn:
+    Description: The ARN of the administrative role used by the organization manager.
+    Value: !GetAtt [ OrgManagerAdminRole, Arn ]
